@@ -1,1 +1,0 @@
-{"version":1,"contracts":[{"id":"11at7s0kuhs0e","package_name":"semacairo","contract_name":"Semaphore","module_path":"semacairo::semaphore::Semaphore","artifacts":{"sierra":"semacairo_Semaphore.contract_class.json","casm":null}}]}

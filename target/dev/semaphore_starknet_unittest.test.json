@@ -1,1 +1,0 @@
-{"contracts_info":[],"function_set_costs":[],"named_tests":[["semaphore_starknet::merkle_tree::tests::test_merkle_root_calculation",{"available_gas":4294967295,"expectation":"Success","ignored":false}],["semaphore_starknet::merkle_tree::tests::test_incremental_insert",{"available_gas":4294967295,"expectation":"Success","ignored":false}]]}
