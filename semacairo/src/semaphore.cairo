@@ -28,10 +28,15 @@ mod Semaphore {
     use core::array::ArrayTrait;
     use core::poseidon::poseidon_hash_span;
     use core::traits::{Into, TryInto};
-    use semacairo::groth16_verifier::{IGroth16VerifierBN254Dispatcher, IGroth16VerifierBN254DispatcherTrait};
+    use semacairo::groth16_verifier::{
+        IGroth16VerifierBN254Dispatcher, IGroth16VerifierBN254DispatcherTrait,
+    };
     use semacairo::merkle_tree;
-    use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::ContractAddress;
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
+    };
     use super::ISemaphore;
 
     #[storage]
@@ -184,7 +189,8 @@ mod Semaphore {
             }
 
             let public_inputs = result.unwrap();
-            // public_inputs should be [merkle_tree_root, signal, nullifier_hash, external_nullifier]
+            // public_inputs should be [merkle_tree_root, signal, nullifier_hash,
+            // external_nullifier]
             if public_inputs.len() != 4 {
                 return false;
             }
