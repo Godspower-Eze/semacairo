@@ -12,6 +12,7 @@ trait ISemaphore<TContractState> {
         proof: Span<felt252>,
     ) -> bool;
     fn get_root(self: @TContractState, group_id: u256) -> felt252;
+    fn get_group_admin(self: @TContractState, group_id: u256) -> starknet::ContractAddress;
     fn signal(
         ref self: TContractState,
         group_id: u256,
@@ -33,6 +34,7 @@ mod Semaphore {
     };
     use semacairo::merkle_tree;
     use starknet::ContractAddress;
+    use starknet::get_caller_address;
     use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
@@ -52,6 +54,10 @@ mod Semaphore {
         zero_values: Map<u8, felt252>,
         // Address of the Groth16 verifier contract
         groth16_verifier_address: ContractAddress,
+        // Admin of each group (group_id -> admin address)
+        group_admins: Map<u256, ContractAddress>,
+        // Track members per group: (group_id, identity_commitment) -> is_member
+        group_members: Map<(u256, felt252), bool>,
     }
 
     #[event]
@@ -67,6 +73,7 @@ mod Semaphore {
         #[key]
         group_id: u256,
         depth: u8,
+        admin: ContractAddress,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -116,6 +123,10 @@ mod Semaphore {
             assert(existing_depth == 0, 'Group already exists');
             assert(depth <= 32, 'Depth too large');
 
+            // Set the caller as group admin
+            let admin = get_caller_address();
+            self.group_admins.write(group_id, admin);
+
             self.group_depths.write(group_id, depth);
             self.group_sizes.write(group_id, 0);
 
@@ -123,12 +134,21 @@ mod Semaphore {
             let root = self.zero_values.read(depth);
             self.group_roots.write(group_id, root);
 
-            self.emit(GroupCreated { group_id, depth });
+            self.emit(GroupCreated { group_id, depth, admin });
         }
 
         fn add_member(ref self: ContractState, group_id: u256, identity_commitment: felt252) {
             let depth = self.group_depths.read(group_id);
             assert(depth != 0, 'Group does not exist');
+
+            // Only admin can add members
+            let caller = get_caller_address();
+            let admin = self.group_admins.read(group_id);
+            assert(caller == admin, 'Only admin can add members');
+
+            // Check member not already in group
+            let is_member = self.group_members.read((group_id, identity_commitment));
+            assert(!is_member, 'Member already in group');
 
             let size = self.group_sizes.read(group_id);
 
@@ -149,6 +169,9 @@ mod Semaphore {
             // Update state
             self.group_roots.write(group_id, new_root);
             self.group_sizes.write(group_id, size + 1);
+
+            // Mark member as added
+            self.group_members.write((group_id, identity_commitment), true);
 
             let updates_span = updates.span();
             let mut j = 0;
@@ -218,6 +241,10 @@ mod Semaphore {
             self.group_roots.read(group_id)
         }
 
+        fn get_group_admin(self: @ContractState, group_id: u256) -> ContractAddress {
+            self.group_admins.read(group_id)
+        }
+
         fn signal(
             ref self: ContractState,
             group_id: u256,
@@ -244,14 +271,22 @@ mod Semaphore {
     }
     #[cfg(test)]
     mod tests {
+        use snforge_std::start_cheat_caller_address_global;
         use super::SemaphoreImpl;
+
+        fn setup() -> super::ContractState {
+            let mut state = super::contract_state_for_testing();
+            let dummy_verifier: starknet::ContractAddress = 0.try_into().unwrap();
+            super::constructor(ref state, dummy_verifier);
+            state
+        }
 
         #[test]
         fn test_create_group_and_add_member() {
             // 1. Setup
-            let mut state = super::contract_state_for_testing();
-            let dummy_verifier = 0.try_into().unwrap();
-            super::constructor(ref state, dummy_verifier);
+            let mut state = setup();
+            let admin: starknet::ContractAddress = 1.try_into().unwrap();
+            start_cheat_caller_address_global(admin);
 
             // 2. Create Group
             let group_id = 1;
@@ -259,11 +294,15 @@ mod Semaphore {
 
             SemaphoreImpl::create_group(ref state, group_id, depth);
 
+            // Check admin is set correctly
+            let stored_admin = SemaphoreImpl::get_group_admin(@state, group_id);
+            assert(stored_admin == admin, 'Admin should be caller');
+
             // Check root is zero value
             let root = SemaphoreImpl::get_root(@state, group_id);
             assert(root != 0, 'Root should be non-zero');
 
-            // 3. Add Member
+            // 3. Add Member (as admin)
             let identity_commitment = 12345;
             SemaphoreImpl::add_member(ref state, group_id, identity_commitment);
 
@@ -277,6 +316,38 @@ mod Semaphore {
 
             let root2 = SemaphoreImpl::get_root(@state, group_id);
             assert(root2 != new_root, 'Root should change again');
+        }
+
+        #[test]
+        #[should_panic(expected: 'Only admin can add members')]
+        fn test_non_admin_cannot_add_member() {
+            let mut state = setup();
+            let admin: starknet::ContractAddress = 1.try_into().unwrap();
+            let non_admin: starknet::ContractAddress = 2.try_into().unwrap();
+
+            // Create group as admin
+            start_cheat_caller_address_global(admin);
+            SemaphoreImpl::create_group(ref state, 1, 20);
+
+            // Try to add member as non-admin — should panic
+            start_cheat_caller_address_global(non_admin);
+            SemaphoreImpl::add_member(ref state, 1, 12345);
+        }
+
+        #[test]
+        #[should_panic(expected: 'Member already in group')]
+        fn test_duplicate_member_rejected() {
+            let mut state = setup();
+            let admin: starknet::ContractAddress = 1.try_into().unwrap();
+            start_cheat_caller_address_global(admin);
+
+            SemaphoreImpl::create_group(ref state, 1, 20);
+
+            let identity_commitment = 12345;
+            SemaphoreImpl::add_member(ref state, 1, identity_commitment);
+
+            // Try to add same member again — should panic
+            SemaphoreImpl::add_member(ref state, 1, identity_commitment);
         }
     }
 }
