@@ -1,18 +1,19 @@
 use core::array::ArrayTrait;
-use core::poseidon::poseidon_hash_span;
+use core::poseidon::PoseidonTrait;
+use core::hash::{HashStateTrait, HashStateExTrait};
 
 #[derive(Drop, Copy)]
 struct MerkleTree {
     depth: u32,
-    root: felt252,
+    root: u256,
 }
 
 // Calculates the generic Merkle root from a leaf and a proof path.
 // proof_siblings: elements along the path to the root.
 // path_indices: 0 (left) or 1 (right) for each level.
 fn calculate_root(
-    leaf: felt252, proof_siblings: Span<felt252>, path_indices: Span<bool>,
-) -> felt252 {
+    leaf: u256, proof_siblings: Span<u256>, path_indices: Span<bool>,
+) -> u256 {
     let mut current_hash = leaf;
     let mut i = 0;
     let depth = proof_siblings.len();
@@ -21,18 +22,13 @@ fn calculate_root(
         let sibling = *proof_siblings.at(i);
         let is_right_node = *path_indices.at(i);
 
-        let mut input_array = ArrayTrait::new();
         if is_right_node {
             // current_hash is the right child
-            input_array.append(sibling);
-            input_array.append(current_hash);
+            current_hash = PoseidonTrait::new().update_with(sibling).update_with(current_hash).finalize().into();
         } else {
             // current_hash is the left child
-            input_array.append(current_hash);
-            input_array.append(sibling);
+            current_hash = PoseidonTrait::new().update_with(current_hash).update_with(sibling).finalize().into();
         }
-
-        current_hash = poseidon_hash_span(input_array.span());
         i += 1;
     }
 
@@ -41,7 +37,7 @@ fn calculate_root(
 
 // Confirms if a leaf exists in the tree with the given root.
 fn verify(
-    root: felt252, leaf: felt252, proof_siblings: Span<felt252>, path_indices: Span<bool>,
+    root: u256, leaf: u256, proof_siblings: Span<u256>, path_indices: Span<bool>,
 ) -> bool {
     let calculated = calculate_root(leaf, proof_siblings, path_indices);
     calculated == root
@@ -50,7 +46,7 @@ fn verify(
 #[derive(Drop, Copy)]
 pub struct FrontierUpdate {
     pub level: u8,
-    pub node: felt252,
+    pub node: u256,
 }
 
 // Inserts a leaf into the incremental Merkle Tree given the current size and frontier.
@@ -58,12 +54,12 @@ pub struct FrontierUpdate {
 // frontier: Span of nodes where frontier[i] is the node at level i.
 // zero_values: Span of zero values for each level.
 pub fn insert(
-    leaf: felt252,
+    leaf: u256,
     depth: u32,
     current_size: u256,
-    frontier: Span<felt252>,
-    zero_values: Span<felt252>,
-) -> (felt252, Array<FrontierUpdate>) {
+    frontier: Span<u256>,
+    zero_values: Span<u256>,
+) -> (u256, Array<FrontierUpdate>) {
     let mut current_index = current_size;
     let mut current_level_hash = leaf;
     let mut updates = ArrayTrait::new();
@@ -75,29 +71,17 @@ pub fn insert(
 
         let is_right_node = (current_index % 2) == 1;
 
-        let mut input = ArrayTrait::new();
-
         if is_right_node {
             // Right node. Left is in frontier.
-            // Safety check: frontier must have enough elements.
-            // If frontier is sparse or missing, we assume 0? No, should be passed correctly.
-            // We assume the caller passes a frontier that covers up to depth.
-            // Or at least up to the current needed level.
             let left = *frontier.at(i);
-            input.append(left);
-            input.append(current_level_hash);
-
-            current_level_hash = poseidon_hash_span(input.span());
+            current_level_hash = PoseidonTrait::new().update_with(left).update_with(current_level_hash).finalize().into();
         } else {
             // Left node. Right is zero.
             // Store ourselves in the frontier.
             updates.append(FrontierUpdate { level: level_u8, node: current_level_hash });
 
             let zero = *zero_values.at(i);
-            input.append(current_level_hash);
-            input.append(zero);
-
-            current_level_hash = poseidon_hash_span(input.span());
+            current_level_hash = PoseidonTrait::new().update_with(current_level_hash).update_with(zero).finalize().into();
         }
 
         current_index = current_index / 2;
@@ -112,7 +96,8 @@ pub fn insert(
 #[cfg(test)]
 mod tests {
     use core::array::ArrayTrait;
-    use core::poseidon::poseidon_hash_span;
+    use core::poseidon::PoseidonTrait;
+    use core::hash::{HashStateTrait, HashStateExTrait};
     use super::{FrontierUpdate, calculate_root, insert, verify};
 
     #[test]
@@ -124,22 +109,13 @@ mod tests {
         let leaf_4 = 4;
 
         // H1 = hash(1, 2)
-        let mut h1_input = ArrayTrait::new();
-        h1_input.append(leaf_1);
-        h1_input.append(leaf_2);
-        let h1 = poseidon_hash_span(h1_input.span());
+        let h1: u256 = PoseidonTrait::new().update_with(leaf_1).update_with(leaf_2).finalize().into();
 
         // H2 = hash(3, 4)
-        let mut h2_input = ArrayTrait::new();
-        h2_input.append(leaf_3);
-        h2_input.append(leaf_4);
-        let h2 = poseidon_hash_span(h2_input.span());
+        let h2: u256 = PoseidonTrait::new().update_with(leaf_3).update_with(leaf_4).finalize().into();
 
         // Root = hash(H1, H2)
-        let mut root_input = ArrayTrait::new();
-        root_input.append(h1);
-        root_input.append(h2);
-        let expected_root = poseidon_hash_span(root_input.span());
+        let expected_root: u256 = PoseidonTrait::new().update_with(h1).update_with(h2).finalize().into();
 
         // Proof for L1: [L2, H2]
         let mut proof = ArrayTrait::new();
@@ -163,10 +139,7 @@ mod tests {
         let z0 = 0;
         zero_values.append(z0);
 
-        let mut input0 = ArrayTrait::new();
-        input0.append(z0);
-        input0.append(z0);
-        let z1 = poseidon_hash_span(input0.span());
+        let z1: u256 = PoseidonTrait::new().update_with(z0).update_with(z0).finalize().into();
         zero_values.append(z1);
 
         let zeros = zero_values.span();
@@ -192,10 +165,7 @@ mod tests {
         let up_box1 = updates1_span.at(1);
         let up1: FrontierUpdate = *up_box1;
         assert(up1.level == 1, 'Level should be 1');
-        let mut input1 = ArrayTrait::new();
-        input1.append(1);
-        input1.append(z0);
-        let z2 = poseidon_hash_span(input1.span());
+        let z2: u256 = PoseidonTrait::new().update_with(leaf1).update_with(z0).finalize().into();
         assert(up1.node == z2, 'Node should be z2');
 
         let mut frontier_arr = ArrayTrait::new();
@@ -213,17 +183,11 @@ mod tests {
         let up2: FrontierUpdate = *up2_box;
         assert(up2.level == 1, 'Level should be 1');
 
-        let mut h1_in = ArrayTrait::new();
-        h1_in.append(leaf1);
-        h1_in.append(leaf2);
-        let h1 = poseidon_hash_span(h1_in.span());
+        let h1: u256 = PoseidonTrait::new().update_with(leaf1).update_with(leaf2).finalize().into();
 
         assert(up2.node == h1, 'Node should be h1');
 
-        let mut r_in = ArrayTrait::new();
-        r_in.append(h1);
-        r_in.append(z1);
-        let expected_root2 = poseidon_hash_span(r_in.span());
+        let expected_root2: u256 = PoseidonTrait::new().update_with(h1).update_with(z1).finalize().into();
 
         assert(root2 == expected_root2, 'Root2 mismatch');
     }

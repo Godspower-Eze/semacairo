@@ -1,25 +1,25 @@
 #[starknet::interface]
 trait ISemaphore<TContractState> {
     fn create_group(ref self: TContractState, group_id: u256, depth: u8);
-    fn add_member(ref self: TContractState, group_id: u256, identity_commitment: felt252);
+    fn add_member(ref self: TContractState, group_id: u256, identity_commitment: u256);
     fn verify_proof(
         self: @TContractState,
         group_id: u256,
-        merkle_tree_root: felt252,
-        signal: felt252,
-        nullifier_hash: u256,
-        external_nullifier: u256,
+        merkle_tree_root: u256,
+        nullifier: u256,
+        message: u256,
+        scope: u256,
         proof: Span<felt252>,
     ) -> bool;
-    fn get_root(self: @TContractState, group_id: u256) -> felt252;
+    fn get_root(self: @TContractState, group_id: u256) -> u256;
     fn get_group_admin(self: @TContractState, group_id: u256) -> starknet::ContractAddress;
-    fn signal(
+    fn send_message(
         ref self: TContractState,
         group_id: u256,
-        merkle_tree_root: felt252,
-        signal: felt252,
-        nullifier_hash: u256,
-        external_nullifier: u256,
+        merkle_tree_root: u256,
+        nullifier: u256,
+        message: u256,
+        scope: u256,
         proof: Span<felt252>,
     );
 }
@@ -27,8 +27,9 @@ trait ISemaphore<TContractState> {
 #[starknet::contract]
 mod Semaphore {
     use core::array::ArrayTrait;
-    use core::poseidon::poseidon_hash_span;
-    use core::traits::{Into, TryInto};
+    use core::poseidon::PoseidonTrait;
+    use core::hash::{HashStateTrait, HashStateExTrait};
+    use core::traits::Into;
     use semacairo::groth16_verifier::{
         IGroth16VerifierBN254Dispatcher, IGroth16VerifierBN254DispatcherTrait,
     };
@@ -43,21 +44,21 @@ mod Semaphore {
 
     #[storage]
     struct Storage {
-        group_roots: Map<u256, felt252>,
+        group_roots: Map<u256, u256>,
         group_depths: Map<u256, u8>,
         group_sizes: Map<u256, u256>,
         nullifiers: Map<u256, bool>, // nullifier_hash -> is_used
         // Frontier for incremental Merkle Tree
         // keys: (group_id, level) -> value
-        tree_frontier: Map<(u256, u8), felt252>,
+        tree_frontier: Map<(u256, u8), u256>,
         // Zero values for each level
-        zero_values: Map<u8, felt252>,
+        zero_values: Map<u8, u256>,
         // Address of the Groth16 verifier contract
         groth16_verifier_address: ContractAddress,
         // Admin of each group (group_id -> admin address)
         group_admins: Map<u256, ContractAddress>,
         // Track members per group: (group_id, identity_commitment) -> is_member
-        group_members: Map<(u256, felt252), bool>,
+        group_members: Map<(u256, u256), bool>,
     }
 
     #[event]
@@ -65,7 +66,7 @@ mod Semaphore {
     enum Event {
         GroupCreated: GroupCreated,
         MemberAdded: MemberAdded,
-        Signal: Signal,
+        MessageSent: MessageSent,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -81,17 +82,18 @@ mod Semaphore {
         #[key]
         group_id: u256,
         index: u256,
-        identity_commitment: felt252,
-        root: felt252,
+        identity_commitment: u256,
+        root: u256,
     }
 
     #[derive(Drop, starknet::Event)]
-    struct Signal {
+    struct MessageSent {
         #[key]
         group_id: u256,
-        root: felt252,
-        nullifier_hash: u256,
-        signal: felt252,
+        root: u256,
+        nullifier: u256,
+        message: u256,
+        scope: u256,
     }
 
     #[constructor]
@@ -103,10 +105,7 @@ mod Semaphore {
         // Compute subsequent zero values: hash(prev, prev)
         let mut i: u8 = 1;
         while i <= 32 {
-            let mut input = ArrayTrait::new();
-            input.append(current_zero);
-            input.append(current_zero);
-            current_zero = poseidon_hash_span(input.span());
+            current_zero = PoseidonTrait::new().update_with(current_zero).update_with(current_zero).finalize().into();
             self.zero_values.write(i, current_zero);
             i += 1;
         }
@@ -137,7 +136,7 @@ mod Semaphore {
             self.emit(GroupCreated { group_id, depth, admin });
         }
 
-        fn add_member(ref self: ContractState, group_id: u256, identity_commitment: felt252) {
+        fn add_member(ref self: ContractState, group_id: u256, identity_commitment: u256) {
             let depth = self.group_depths.read(group_id);
             assert(depth != 0, 'Group does not exist');
 
@@ -188,14 +187,14 @@ mod Semaphore {
         fn verify_proof(
             self: @ContractState,
             group_id: u256,
-            merkle_tree_root: felt252,
-            signal: felt252,
-            nullifier_hash: u256,
-            external_nullifier: u256,
+            merkle_tree_root: u256,
+            nullifier: u256,
+            message: u256,
+            scope: u256,
             proof: Span<felt252>,
         ) -> bool {
             // 1. Check if the root matches current root
-            let current_root = self.group_roots.read(group_id);
+            let current_root: u256 = self.group_roots.read(group_id);
             if current_root != merkle_tree_root {
                 return false;
             }
@@ -212,61 +211,56 @@ mod Semaphore {
             }
 
             let public_inputs = result.unwrap();
-            // public_inputs should be [merkle_tree_root, signal, nullifier_hash,
-            // external_nullifier]
+            // public_inputs should be [merkle_tree_root, nullifier, message, scope]
             if public_inputs.len() != 4 {
                 return false;
             }
             let pi_merkle_root: u256 = *public_inputs.at(0);
-            let pi_signal: u256 = *public_inputs.at(1);
-            let pi_nullifier_hash: u256 = *public_inputs.at(2);
-            let pi_external_nullifier: u256 = *public_inputs.at(3);
+            let pi_nullifier: u256 = *public_inputs.at(1);
+            let pi_message: u256 = *public_inputs.at(2);
+            let pi_scope: u256 = *public_inputs.at(3);
 
-            // Compare with provided values
-            // Convert felt252 to u256 for comparison
-            let merkle_root_u256: u256 = merkle_tree_root.try_into().unwrap();
-            let signal_u256: u256 = signal.try_into().unwrap();
-
-            if pi_merkle_root != merkle_root_u256
-                || pi_signal != signal_u256
-                || pi_nullifier_hash != nullifier_hash
-                || pi_external_nullifier != external_nullifier {
+            if pi_merkle_root != merkle_tree_root
+                || pi_message != message
+                || pi_nullifier != nullifier
+                || pi_scope != scope {
                 return false;
             }
 
             true
         }
 
-        fn get_root(self: @ContractState, group_id: u256) -> felt252 {
-            self.group_roots.read(group_id)
-        }
-
-        fn get_group_admin(self: @ContractState, group_id: u256) -> ContractAddress {
-            self.group_admins.read(group_id)
-        }
-
-        fn signal(
+        fn send_message(
             ref self: ContractState,
             group_id: u256,
-            merkle_tree_root: felt252,
-            signal: felt252,
-            nullifier_hash: u256,
-            external_nullifier: u256,
+            merkle_tree_root: u256,
+            nullifier: u256,
+            message: u256,
+            scope: u256,
             proof: Span<felt252>,
         ) {
             // 1. Verify correctness (Merkle root, proof structure)
             let is_valid = self
                 .verify_proof(
-                    group_id, merkle_tree_root, signal, nullifier_hash, external_nullifier, proof,
+                    group_id, merkle_tree_root, nullifier, message, scope, proof,
                 );
             assert(is_valid, 'Invalid ZK Proof');
 
             // 2. Check and Set Nullifier
-            assert(!self.nullifiers.read(nullifier_hash), 'Nullifier already used');
-            self.nullifiers.write(nullifier_hash, true);
+            assert(!self.nullifiers.read(nullifier), 'Nullifier already used');
+            self.nullifiers.write(nullifier, true);
 
-            // 3. Emit Signal
-            self.emit(Signal { group_id, root: merkle_tree_root, nullifier_hash, signal });
+            // 3. Emit MessageSent
+            self.emit(MessageSent { group_id, root: merkle_tree_root, nullifier, message, scope });
+        }
+
+
+        fn get_root(self: @ContractState, group_id: u256) -> u256 {
+            self.group_roots.read(group_id)
+        }
+
+        fn get_group_admin(self: @ContractState, group_id: u256) -> ContractAddress {
+            self.group_admins.read(group_id)
         }
     }
     #[cfg(test)]
