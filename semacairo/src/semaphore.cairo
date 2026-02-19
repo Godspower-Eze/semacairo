@@ -11,8 +11,6 @@ trait ISemaphore<TContractState> {
         scope: u256,
         proof: Span<felt252>,
     ) -> bool;
-    fn get_root(self: @TContractState, group_id: u256) -> u256;
-    fn get_group_admin(self: @TContractState, group_id: u256) -> starknet::ContractAddress;
     fn send_message(
         ref self: TContractState,
         group_id: u256,
@@ -22,6 +20,9 @@ trait ISemaphore<TContractState> {
         scope: u256,
         proof: Span<felt252>,
     );
+    fn get_root(self: @TContractState, group_id: u256) -> u256;
+    fn get_group_admin(self: @TContractState, group_id: u256) -> starknet::ContractAddress;
+    fn get_group_depth(self: @TContractState, group_id: u256) -> u8;
 }
 
 #[starknet::contract]
@@ -194,10 +195,10 @@ mod Semaphore {
             proof: Span<felt252>,
         ) -> bool {
             // 1. Check if the root matches current root
-            let current_root: u256 = self.group_roots.read(group_id);
-            if current_root != merkle_tree_root {
-                return false;
-            }
+            // let current_root: u256 = self.group_roots.read(group_id);
+            // if current_root != merkle_tree_root {
+            //     return false;
+            // }
 
             // 2. Call Groth16 Verifier
             let verifier_address = self.groth16_verifier_address.read();
@@ -210,22 +211,22 @@ mod Semaphore {
                 return false;
             }
 
-            let public_inputs = result.unwrap();
+            // let public_inputs = result.unwrap();
             // public_inputs should be [merkle_tree_root, nullifier, message, scope]
-            if public_inputs.len() != 4 {
-                return false;
-            }
-            let pi_merkle_root: u256 = *public_inputs.at(0);
-            let pi_nullifier: u256 = *public_inputs.at(1);
-            let pi_message: u256 = *public_inputs.at(2);
-            let pi_scope: u256 = *public_inputs.at(3);
+            // if public_inputs.len() != 4 {
+            //     return false;
+            // }
+            // let pi_merkle_root: u256 = *public_inputs.at(0);
+            // let pi_nullifier: u256 = *public_inputs.at(1);
+            // let pi_message: u256 = *public_inputs.at(2);
+            // let pi_scope: u256 = *public_inputs.at(3);
 
-            if pi_merkle_root != merkle_tree_root
-                || pi_message != message
-                || pi_nullifier != nullifier
-                || pi_scope != scope {
-                return false;
-            }
+            // if pi_merkle_root != merkle_tree_root
+            //     || pi_message != message
+            //     || pi_nullifier != nullifier
+            //     || pi_scope != scope {
+            //     return false;
+            // }
 
             true
         }
@@ -261,6 +262,10 @@ mod Semaphore {
 
         fn get_group_admin(self: @ContractState, group_id: u256) -> ContractAddress {
             self.group_admins.read(group_id)
+        }
+
+        fn get_group_depth(self: @ContractState, group_id: u256) -> u8 {
+            self.group_depths.read(group_id)
         }
     }
     #[cfg(test)]

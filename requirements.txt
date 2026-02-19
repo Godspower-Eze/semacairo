@@ -45,6 +45,7 @@ rich==14.3.2
 semver==3.0.4
 shellingham==1.5.4
 six==1.17.0
+starknet-py==0.26.2
 starknet-py-unbroken==0.29.0rc3
 sympy==1.12.1
 toolz==1.1.0
