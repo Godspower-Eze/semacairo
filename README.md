@@ -1,7 +1,12 @@
 # Semaphore Cairo Verifier
 
-This repository contains a full Cairo-native implementation of the Semaphore Verifier on Starknet. It verifies Groth16 proofs over the BN254 elliptic curve, allowing Semaphore identities to join groups and cast signals privately on Starknet.
+This repository contains a full Cairo-native implementation of the Semaphore Verifier on Starknet. It uses the [Garaga](https://github.com/keep-starknet-strange/garaga) library to directly generate the Groth16 verifiers used to verify proofs over the BN254 elliptic curve, allowing Semaphore identities to join groups and cast signals privately on Starknet.
 
+## Live Demo
+
+You can try out the integration and create zero-knowledge groups directly from your browser via our live deployment:
+
+**[semacairo.netlify.app](https://semacairo.netlify.app)**
 ## Overview
 
 Semaphore is a zero-knowledge protocol that allows users to prove their membership in a group and send signals such as votes or endorsements without revealing their original identity.
@@ -40,7 +45,6 @@ To ensure the Cairo verifiers align exactly with the official Semaphore circuit 
 
 The `verification_keys/` directory contains `semaphore-1.json` through `semaphore-32.json`. These files represent the cryptographic parameters for each supported Merkle tree depth.
 
-**Garaga:** We use the [Garaga](https://github.com/keep-starknet-strange/garaga) CLI tool to ingest these JSON files and directly translate them into Cairo zero-knowledge logic. Garaga processes these verification keys and generates the respective native Groth16 Verifiers, building the foundation of this repository's cryptographic verification.
 
 ## Prerequisites
 
@@ -78,11 +82,7 @@ cd semacairo
 ./deploy.sh
 ```
 
-### Script Workflow:
-1. Iterates from `1` to `12`, declaring and deploying `Semaphore_Groth16VerifierBN254_N`.
-2. Uses a `sleep` mechanism for class hashes to be indexed by testnet RPCs to avoid deployment failure.
-3. Keeps track of the 12 generated contract addresses.
-4. Declares and deploys the main `Semaphore` contract, passing the 12 addresses as `Span<ContractAddress>` calldata into the constructor.
+
 
 ## Supported Depths
 
