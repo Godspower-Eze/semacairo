@@ -34,6 +34,15 @@ The main `Semaphore` contract takes an array of the 12 verifier addresses in its
 └── verification_keys/           # Serialized verification keys for all 32 depths
 ```
 
+## Verifier Generation from Official Keys
+
+To ensure the Cairo verifiers align with the official Semaphore circuit parameters, the verification keys are downloaded directly from the official **PSE (Privacy & Scaling Explorations) Trusted Setup** artifacts for Semaphore.
+
+The `verification_keys/` directory contains `semaphore-1.json` through `semaphore-32.json`. These files represent the cryptographic parameters for each supported Merkle tree depth.
+
+1. **Garaga Conversion**: The [Garaga](https://github.com/keep-starknet-strange/garaga) CLI tool parses these JSON verification keys into hardcoded constants mapping directly to Starknet's field arithmetic using the inner BN254 implementation.
+2. **File Splitting**: The `split_verifier.py` script automatically processes these constants and compiles them into 12 partitioned `.cairo` verifier contracts to resolve Starknet's strict 80KB contract deployment constraints.
+
 ## Prerequisites
 
 *   **Scarb** (`v2.14.0`)
