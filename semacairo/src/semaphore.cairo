@@ -23,6 +23,7 @@ trait ISemaphore<TContractState> {
     fn get_root(self: @TContractState, group_id: u256) -> u256;
     fn get_group_admin(self: @TContractState, group_id: u256) -> starknet::ContractAddress;
     fn get_group_depth(self: @TContractState, group_id: u256) -> u8;
+    fn get_verifier(self: @TContractState, depth: u8) -> starknet::ContractAddress;
 }
 
 #[starknet::contract]
@@ -31,15 +32,12 @@ mod Semaphore {
     use core::poseidon::PoseidonTrait;
     use core::hash::{HashStateTrait, HashStateExTrait};
     use core::traits::Into;
-    use semacairo::groth16_verifier::{
-        IGroth16VerifierBN254Dispatcher, IGroth16VerifierBN254DispatcherTrait,
-    };
+    use semacairo::semaphore_verifier_interface::{ISemaphoreVerifierDispatcher, ISemaphoreVerifierDispatcherTrait};
     use semacairo::merkle_tree;
     use starknet::ContractAddress;
     use starknet::get_caller_address;
     use starknet::storage::{
-        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
-        StoragePointerWriteAccess,
+        Map, StorageMapReadAccess, StorageMapWriteAccess,
     };
     use super::ISemaphore;
 
@@ -54,8 +52,8 @@ mod Semaphore {
         tree_frontier: Map<(u256, u8), u256>,
         // Zero values for each level
         zero_values: Map<u8, u256>,
-        // Address of the Groth16 verifier contract
-        groth16_verifier_address: ContractAddress,
+        // Addresses of the Groth16 verifier contracts mapping index to address
+        groth16_verifier_addresses: Map<u8, ContractAddress>,
         // Admin of each group (group_id -> admin address)
         group_admins: Map<u256, ContractAddress>,
         // Track members per group: (group_id, identity_commitment) -> is_member
@@ -98,7 +96,12 @@ mod Semaphore {
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, groth16_verifier_address: ContractAddress) {
+    fn constructor(
+        ref self: ContractState,
+        verifiers: Span<ContractAddress>
+    ) {
+        assert(verifiers.len() == 12, 'Must provide 12 verifiers');
+
         // Initialize zero values for a reasonable depth, e.g., 20
         let mut current_zero = 0; // Using 0 as the base zero value
         self.zero_values.write(0, current_zero);
@@ -111,8 +114,12 @@ mod Semaphore {
             i += 1;
         }
 
-        // Store the verifier address
-        self.groth16_verifier_address.write(groth16_verifier_address);
+        // Store the verifier addresses
+        let mut idx: u8 = 0;
+        while idx < 12 {
+            self.groth16_verifier_addresses.write(idx + 1, *verifiers.at(idx.into()));
+            idx += 1;
+        }
     }
 
     #[abi(embed_v0)]
@@ -200,11 +207,16 @@ mod Semaphore {
             //     return false;
             // }
 
-            // 2. Call Groth16 Verifier
-            let verifier_address = self.groth16_verifier_address.read();
-            let dispatcher = IGroth16VerifierBN254Dispatcher { contract_address: verifier_address };
+            // Get depth for this group
+            let depth = self.group_depths.read(group_id);
+            if depth == 0 {
+                return false;
+            }
 
-            let result = dispatcher.verify_groth16_proof_bn254(proof);
+            // 2. Call Groth16 Verifier
+            let verifier_address = self.get_verifier(depth);
+            let dispatcher = ISemaphoreVerifierDispatcher { contract_address: verifier_address };
+            let result = dispatcher.verify_groth16_proof_bn254(depth, proof);
 
             // 3. Verify the proof result
             if result.is_err() {
@@ -267,7 +279,27 @@ mod Semaphore {
         fn get_group_depth(self: @ContractState, group_id: u256) -> u8 {
             self.group_depths.read(group_id)
         }
+
+        fn get_verifier(self: @ContractState, depth: u8) -> ContractAddress {
+            assert(depth > 0 && depth <= 32, 'Unsupported depth');
+            let mut index = 0;
+            if depth <= 24 {
+                index = depth / 3;
+                if depth % 3 != 0 {
+                    index += 1;
+                }
+            } else {
+                let offset = depth - 24;
+                index = 8 + (offset / 2);
+                if offset % 2 != 0 {
+                    index += 1;
+                }
+            }
+            self.groth16_verifier_addresses.read(index)
+        }
     }
+
+
     #[cfg(test)]
     mod tests {
         use snforge_std::start_cheat_caller_address_global;
@@ -276,7 +308,12 @@ mod Semaphore {
         fn setup() -> super::ContractState {
             let mut state = super::contract_state_for_testing();
             let dummy_verifier: starknet::ContractAddress = 0.try_into().unwrap();
-            super::constructor(ref state, dummy_verifier);
+            let verifiers = array![
+                dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier,
+                dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier,
+                dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier
+            ];
+            super::constructor(ref state, verifiers.span());
             state
         }
 
@@ -347,6 +384,58 @@ mod Semaphore {
 
             // Try to add same member again — should panic
             SemaphoreImpl::add_member(ref state, 1, identity_commitment);
+        }
+        #[test]
+        #[should_panic(expected: 'Unsupported depth')]
+        fn test_get_verifier_zero() {
+            let state = setup();
+            SemaphoreImpl::get_verifier(@state, 0);
+        }
+
+        #[test]
+        #[should_panic(expected: 'Unsupported depth')]
+        fn test_get_verifier_out_of_bounds() {
+            let state = setup();
+            SemaphoreImpl::get_verifier(@state, 33);
+        }
+
+        #[test]
+        fn test_get_verifier_mapping() {
+            let mut state = super::contract_state_for_testing();
+            // Setup with specifically numbered dummy verifiers
+            let verifiers = array![
+                1.try_into().unwrap(), 2.try_into().unwrap(), 3.try_into().unwrap(),
+                4.try_into().unwrap(), 5.try_into().unwrap(), 6.try_into().unwrap(),
+                7.try_into().unwrap(), 8.try_into().unwrap(), 9.try_into().unwrap(),
+                10.try_into().unwrap(), 11.try_into().unwrap(), 12.try_into().unwrap(),
+            ];
+            super::constructor(ref state, verifiers.span());
+
+            let mut depth: u8 = 1;
+
+            while depth <= 32 {
+                let verifier_address = SemaphoreImpl::get_verifier(@state, depth);
+                let address_felt: felt252 = verifier_address.into();
+                let address_u256: u256 = address_felt.into();
+                let address_u8: u8 = address_u256.try_into().unwrap();
+
+                let mut expected_index = 0;
+                if depth <= 24 {
+                    expected_index = depth / 3;
+                    if depth % 3 != 0 {
+                        expected_index += 1;
+                    }
+                } else {
+                    let offset = depth - 24;
+                    expected_index = 8 + (offset / 2);
+                    if offset % 2 != 0 {
+                        expected_index += 1;
+                    }
+                }
+
+                assert(address_u8 == expected_index, 'Verifier mapping mismatch');
+                depth += 1;
+            }
         }
     }
 }
