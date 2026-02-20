@@ -29,12 +29,11 @@ The main `Semaphore` contract takes an array of the 12 verifier addresses in its
 ├── semacairo/
 │   ├── Scarb.toml               # Scarb package configuration
 │   ├── deploy.sh                # Deployment script for all contracts
-│   ├── split_verifier.py        # Python script to generate the 12 verifiers
 │   └── src/
 │       ├── lib.cairo            
 │       ├── semaphore.cairo      # Main routing contract and group management
 │       ├── semaphore_verifier_interface.cairo # The verifier interface definition
-│       ├── groth16_verifier_*.cairo # The 12 generated verifier contracts 
+│       ├── groth16_verifier_*.cairo # The verifier contracts 
 │       └── g16v_*_constants.cairo   # Mathematical constants for SNARK verifiers
 └── verification_keys/           # Serialized verification keys for all 32 depths
 ```
