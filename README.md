@@ -1,4 +1,4 @@
-# Semaphore Cairo Verifier
+# Semacairo - Semaphore in Cairo
 
 This repository contains a full Cairo-native implementation of the Semaphore Verifier on Starknet. It uses the [Garaga](https://github.com/keep-starknet-strange/garaga) library to directly generate the Groth16 verifiers used to verify proofs over the BN254 elliptic curve, allowing Semaphore identities to join groups and cast signals privately on Starknet.
 
