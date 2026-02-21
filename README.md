@@ -5,8 +5,12 @@ This repository contains a full Cairo-native implementation of the Semaphore Ver
 ## Live Demo
 
 You can try out the integration and create zero-knowledge groups directly from your browser via our live deployment:
-
 **[semacairo.netlify.app](https://semacairo.netlify.app)**
+
+**Frontend Repository:** [Godspower-Eze/semacairo-fe](https://github.com/Godspower-Eze/semacairo-fe)
+
+**Contract Address (Sepolia):**
+[`0x023e76e23822b88b2e7d0228c1bc6361d44a560013030f0f3923884556cfa85d`](https://sepolia.voyager.online/contract/0x023e76e23822b88b2e7d0228c1bc6361d44a560013030f0f3923884556cfa85d)
 ## Overview
 
 Semaphore is a zero-knowledge protocol that allows users to prove their membership in a group and send signals such as votes or endorsements without revealing their original identity.
@@ -34,7 +38,7 @@ The main `Semaphore` contract takes an array of the 12 verifier addresses in its
 │       ├── semaphore.cairo      # Main routing contract and group management
 │       ├── semaphore_verifier_interface.cairo # The verifier interface definition
 │       ├── groth16_verifier_*.cairo # The verifier contracts 
-│       └── g16v_*_constants.cairo   # Mathematical constants for SNARK verifiers
+│       └── g16v_*_constants.cairo   #  The constants for verifiers
 └── verification_keys/           # Serialized verification keys for all 32 depths
 ```
 
@@ -80,8 +84,6 @@ Ensure you have your environment variables or keystores configured for `sncast` 
 cd semacairo
 ./deploy.sh
 ```
-
-
 
 ## Supported Depths
 
