@@ -5,7 +5,8 @@ This repository contains a full Cairo-native implementation of the Semaphore Ver
 ## Live Demo
 
 You can try out the integration and create zero-knowledge groups directly from your browser via our live deployment:
-**[semacairo.netlify.app](https://semacairo.netlify.app)**
+
+**Demo:** [semacairo.netlify.app](https://semacairo.netlify.app)
 
 **Frontend Repository:** [Godspower-Eze/semacairo-fe](https://github.com/Godspower-Eze/semacairo-fe)
 

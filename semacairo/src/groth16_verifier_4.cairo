@@ -1,7 +1,9 @@
 // Generated split verifier
 use garaga::definitions::G1Point;
 
-fn get_vk(depth: u8) -> garaga::ec::pairing::groth16::Groth16VerifyingKey::<garaga::definitions::structs::fields::u288> {
+fn get_vk(
+    depth: u8,
+) -> garaga::ec::pairing::groth16::Groth16VerifyingKey<garaga::definitions::structs::fields::u288> {
     if depth == 10 {
         return super::g16v_10_constants::vk;
     } else if depth == 11 {
@@ -23,7 +25,10 @@ fn get_ic(depth: u8) -> [G1Point; 5] {
     panic!("Unsupported depth")
 }
 
-fn get_precomputed_lines(depth: u8) -> [garaga::definitions::structs::points::G2Line::<garaga::definitions::structs::fields::u288>; 176] {
+fn get_precomputed_lines(
+    depth: u8,
+) -> [garaga::definitions::structs::points::G2Line::<garaga::definitions::structs::fields::u288>;
+    176] {
     if depth == 10 {
         return super::g16v_10_constants::precomputed_lines;
     } else if depth == 11 {
@@ -42,10 +47,10 @@ mod Semaphore_Groth16VerifierBN254_4 {
         Groth16ProofRawTrait, multi_pairing_check_bn254_3P_2F_with_extra_miller_loop_result,
     };
     use garaga::utils::calldata::deserialize_full_proof_with_hints_bn254;
-    use starknet::SyscallResultTrait;
-    use super::{get_vk, get_ic, get_precomputed_lines};
-    use super::super::g16v_common_constants::N_PUBLIC_INPUTS;
     use semacairo::semaphore_verifier_interface::ISemaphoreVerifier;
+    use starknet::SyscallResultTrait;
+    use super::super::g16v_common_constants::N_PUBLIC_INPUTS;
+    use super::{get_ic, get_precomputed_lines, get_vk};
 
     const ECIP_OPS_CLASS_HASH: felt252 =
         0x312d1dd5f967eaf6f86965e3fa7acbc9d0fbd979066a17721dd913736af2f5e;
@@ -90,11 +95,13 @@ mod Semaphore_Groth16VerifierBN254_4 {
                         .unwrap_syscall();
 
                     ec_safe_add(
-                        Serde::<G1Point>::deserialize(ref _vx_x_serialized).unwrap(), *ic_span.at(0), 0,
+                        Serde::<G1Point>::deserialize(ref _vx_x_serialized).unwrap(),
+                        *ic_span.at(0),
+                        0,
                     )
                 },
             };
-            
+
             let check = multi_pairing_check_bn254_3P_2F_with_extra_miller_loop_result(
                 G1G2Pair { p: vk_x, q: vk.gamma_g2 },
                 G1G2Pair { p: groth16_proof.raw.c, q: vk.delta_g2 },
@@ -103,7 +110,7 @@ mod Semaphore_Groth16VerifierBN254_4 {
                 precomputed_lines.span(),
                 mpcheck_hint,
             );
-            
+
             match check {
                 Result::Ok(_) => Result::Ok(groth16_proof.public_inputs),
                 Result::Err(error) => Result::Err(error),
