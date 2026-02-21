@@ -200,8 +200,15 @@ mod Semaphore {
             message: u256,
             scope: u256,
             proof: Span<felt252>,
-        ) -> bool {
-            // 1. Check if the root matches current root
+            // TODO: Group root validation is currently disabled.
+            // Semaphore uses the Poseidon2 hash function in its Merkle tree implementation 
+            // and within its circom circuits. Currently, Cairo does not have an available 
+            // natively optimized implementation of the Poseidon2 hash function, so 
+            // comparing a locally computed or stored root against the `merkle_tree_root`
+            // from the proof will always fail.
+            //
+            // This check should be reinstated once Poseidon2 is available in Cairo.
+            // =========================================================================
             // let current_root: u256 = self.group_roots.read(group_id);
             // if current_root != merkle_tree_root {
             //     return false;
@@ -223,22 +230,21 @@ mod Semaphore {
                 return false;
             }
 
-            // let public_inputs = result.unwrap();
-            // public_inputs should be [merkle_tree_root, nullifier, message, scope]
-            // if public_inputs.len() != 4 {
-            //     return false;
-            // }
-            // let pi_merkle_root: u256 = *public_inputs.at(0);
-            // let pi_nullifier: u256 = *public_inputs.at(1);
-            // let pi_message: u256 = *public_inputs.at(2);
-            // let pi_scope: u256 = *public_inputs.at(3);
+            let public_inputs = result.unwrap();
+            if public_inputs.len() != 4 {
+                return false;
+            }
+            let pi_merkle_root: u256 = *public_inputs.at(0);
+            let pi_nullifier: u256 = *public_inputs.at(1);
+            let pi_message: u256 = *public_inputs.at(2);
+            let pi_scope: u256 = *public_inputs.at(3);
 
-            // if pi_merkle_root != merkle_tree_root
-            //     || pi_message != message
-            //     || pi_nullifier != nullifier
-            //     || pi_scope != scope {
-            //     return false;
-            // }
+            if pi_merkle_root != merkle_tree_root
+                || pi_message != message
+                || pi_nullifier != nullifier
+                || pi_scope != scope {
+                return false;
+            }
 
             true
         }
