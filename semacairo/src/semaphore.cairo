@@ -24,21 +24,21 @@ trait ISemaphore<TContractState> {
     fn get_group_admin(self: @TContractState, group_id: u256) -> starknet::ContractAddress;
     fn get_group_depth(self: @TContractState, group_id: u256) -> u8;
     fn get_verifier(self: @TContractState, depth: u8) -> starknet::ContractAddress;
+    fn is_nullifier_used(self: @TContractState, nullifier: u256) -> bool;
 }
 
 #[starknet::contract]
 mod Semaphore {
     use core::array::ArrayTrait;
+    use core::hash::{HashStateExTrait, HashStateTrait};
     use core::poseidon::PoseidonTrait;
-    use core::hash::{HashStateTrait, HashStateExTrait};
     use core::traits::Into;
-    use semacairo::semaphore_verifier_interface::{ISemaphoreVerifierDispatcher, ISemaphoreVerifierDispatcherTrait};
     use semacairo::merkle_tree;
-    use starknet::ContractAddress;
-    use starknet::get_caller_address;
-    use starknet::storage::{
-        Map, StorageMapReadAccess, StorageMapWriteAccess,
+    use semacairo::semaphore_verifier_interface::{
+        ISemaphoreVerifierDispatcher, ISemaphoreVerifierDispatcherTrait,
     };
+    use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
+    use starknet::{ContractAddress, get_caller_address};
     use super::ISemaphore;
 
     #[storage]
@@ -96,10 +96,7 @@ mod Semaphore {
     }
 
     #[constructor]
-    fn constructor(
-        ref self: ContractState,
-        verifiers: Span<ContractAddress>
-    ) {
+    fn constructor(ref self: ContractState, verifiers: Span<ContractAddress>) {
         assert(verifiers.len() == 12, 'Must provide 12 verifiers');
 
         // Initialize zero values for a reasonable depth, e.g., 20
@@ -109,7 +106,11 @@ mod Semaphore {
         // Compute subsequent zero values: hash(prev, prev)
         let mut i: u8 = 1;
         while i <= 32 {
-            current_zero = PoseidonTrait::new().update_with(current_zero).update_with(current_zero).finalize().into();
+            current_zero = PoseidonTrait::new()
+                .update_with(current_zero)
+                .update_with(current_zero)
+                .finalize()
+                .into();
             self.zero_values.write(i, current_zero);
             i += 1;
         }
@@ -200,10 +201,11 @@ mod Semaphore {
             message: u256,
             scope: u256,
             proof: Span<felt252>,
+        ) -> bool {
             // TODO: Group root validation is currently disabled.
-            // Semaphore uses the Poseidon2 hash function in its Merkle tree implementation 
-            // and within its circom circuits. Currently, Cairo does not have an available 
-            // natively optimized implementation of the Poseidon2 hash function, so 
+            // Semaphore uses the Poseidon2 hash function in its Merkle tree implementation
+            // and within its circom circuits. Currently, Cairo does not have an available
+            // natively optimized implementation of the Poseidon2 hash function, so
             // comparing a locally computed or stored root against the `merkle_tree_root`
             // from the proof will always fail.
             //
@@ -260,9 +262,7 @@ mod Semaphore {
         ) {
             // 1. Verify correctness (Merkle root, proof structure)
             let is_valid = self
-                .verify_proof(
-                    group_id, merkle_tree_root, nullifier, message, scope, proof,
-                );
+                .verify_proof(group_id, merkle_tree_root, nullifier, message, scope, proof);
             assert(is_valid, 'Invalid ZK Proof');
 
             // 2. Check and Set Nullifier
@@ -303,6 +303,10 @@ mod Semaphore {
             }
             self.groth16_verifier_addresses.read(index)
         }
+
+        fn is_nullifier_used(self: @ContractState, nullifier: u256) -> bool {
+            self.nullifiers.read(nullifier)
+        }
     }
 
 
@@ -315,9 +319,9 @@ mod Semaphore {
             let mut state = super::contract_state_for_testing();
             let dummy_verifier: starknet::ContractAddress = 0.try_into().unwrap();
             let verifiers = array![
-                dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier,
-                dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier,
-                dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier
+                dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier,
+                dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier, dummy_verifier,
+                dummy_verifier, dummy_verifier,
             ];
             super::constructor(ref state, verifiers.span());
             state
